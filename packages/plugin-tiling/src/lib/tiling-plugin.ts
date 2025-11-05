@@ -136,10 +136,16 @@ export class TilingPlugin extends BasePlugin<TilingPluginConfig, TilingCapabilit
   }
 
   protected buildCapability(): TilingCapability {
-    return {
+    const capability: TilingCapability = {
       renderTile: this.renderTile.bind(this),
       onTileRendering: this.tileRendering$.on,
     };
+
+    if (this.renderCapability.renderPageRectBitmap) {
+      capability.renderTileBitmap = this.renderTileBitmap.bind(this);
+    }
+
+    return capability;
   }
 
   private renderTile(options: RenderTileOptions) {
@@ -150,6 +156,29 @@ export class TilingPlugin extends BasePlugin<TilingPluginConfig, TilingCapabilit
     this.dispatch(markTileStatus(options.pageIndex, options.tile.id, 'rendering'));
 
     const task = this.renderCapability.renderPageRect({
+      pageIndex: options.pageIndex,
+      rect: options.tile.pageRect,
+      options: {
+        scaleFactor: options.tile.srcScale,
+        dpr: options.dpr,
+      },
+    });
+
+    task.wait(() => {
+      this.dispatch(markTileStatus(options.pageIndex, options.tile.id, 'ready'));
+    }, ignore);
+
+    return task;
+  }
+
+  private renderTileBitmap(options: RenderTileOptions) {
+    if (!this.renderCapability.renderPageRectBitmap) {
+      throw new Error('Render capability does not support bitmap rendering.');
+    }
+
+    this.dispatch(markTileStatus(options.pageIndex, options.tile.id, 'rendering'));
+
+    const task = this.renderCapability.renderPageRectBitmap({
       pageIndex: options.pageIndex,
       rect: options.tile.pageRect,
       options: {

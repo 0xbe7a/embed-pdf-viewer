@@ -33,10 +33,20 @@ export class RenderPlugin extends BasePlugin<RenderPluginConfig, RenderCapabilit
   }
 
   protected buildCapability(): RenderCapability {
-    return {
+    const capability: RenderCapability = {
       renderPage: this.renderPage.bind(this),
       renderPageRect: this.renderPageRect.bind(this),
     };
+
+    if (typeof this.engine.renderPageBitmap === 'function') {
+      capability.renderPageBitmap = this.renderPageBitmap.bind(this);
+    }
+
+    if (typeof this.engine.renderPageRectBitmap === 'function') {
+      capability.renderPageRectBitmap = this.renderPageRectBitmap.bind(this);
+    }
+
+    return capability;
   }
 
   public onRefreshPages(fn: (pages: number[]) => void): Unsubscribe {
@@ -83,5 +93,55 @@ export class RenderPlugin extends BasePlugin<RenderPluginConfig, RenderCapabilit
     };
 
     return this.engine.renderPageRect(coreState.document, page, rect, mergedOptions);
+  }
+
+  private renderPageBitmap({ pageIndex, options }: RenderPageOptions) {
+    if (typeof this.engine.renderPageBitmap !== 'function') {
+      throw new Error('renderPageBitmap is not supported by the underlying engine');
+    }
+
+    const coreState = this.coreState.core;
+
+    if (!coreState.document) {
+      throw new Error('document does not open');
+    }
+
+    const page = coreState.document.pages.find((page) => page.index === pageIndex);
+    if (!page) {
+      throw new Error('page does not exist');
+    }
+
+    const mergedOptions = {
+      ...(options ?? {}),
+      withForms: options?.withForms ?? this.withForms,
+      withAnnotations: options?.withAnnotations ?? this.withAnnotations,
+    };
+
+    return this.engine.renderPageBitmap(coreState.document, page, mergedOptions);
+  }
+
+  private renderPageRectBitmap({ pageIndex, rect, options }: RenderPageRectOptions) {
+    if (typeof this.engine.renderPageRectBitmap !== 'function') {
+      throw new Error('renderPageRectBitmap is not supported by the underlying engine');
+    }
+
+    const coreState = this.coreState.core;
+
+    if (!coreState.document) {
+      throw new Error('document does not open');
+    }
+
+    const page = coreState.document.pages.find((page) => page.index === pageIndex);
+    if (!page) {
+      throw new Error('page does not exist');
+    }
+
+    const mergedOptions = {
+      ...(options ?? {}),
+      withForms: options?.withForms ?? this.withForms,
+      withAnnotations: options?.withAnnotations ?? this.withAnnotations,
+    };
+
+    return this.engine.renderPageRectBitmap(coreState.document, page, rect, mergedOptions);
   }
 }

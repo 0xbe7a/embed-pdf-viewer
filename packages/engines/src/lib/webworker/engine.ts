@@ -415,6 +415,25 @@ export class WebWorkerEngine implements PdfEngine {
     return task;
   }
 
+  renderPageBitmap(
+    doc: PdfDocumentObject,
+    page: PdfPageObject,
+    options?: PdfRenderPageOptions,
+  ) {
+    this.logger.debug(LOG_SOURCE, LOG_CATEGORY, 'renderPageBitmap', doc, page, options);
+    const requestId = this.generateRequestId(doc.id);
+    const task = new WorkerTask<ImageBitmap>(this.worker, requestId);
+
+    const request: ExecuteRequest = createRequest(requestId, 'renderPageBitmap', [
+      doc,
+      page,
+      options,
+    ]);
+    this.proxy(task, request);
+
+    return task;
+  }
+
   /**
    * {@inheritDoc @embedpdf/models!PdfEngine.renderPageRect}
    *
@@ -431,6 +450,35 @@ export class WebWorkerEngine implements PdfEngine {
     const task = new WorkerTask<Blob>(this.worker, requestId);
 
     const request: ExecuteRequest = createRequest(requestId, 'renderPageRect', [
+      doc,
+      page,
+      rect,
+      options,
+    ]);
+    this.proxy(task, request);
+
+    return task;
+  }
+
+  renderPageRectBitmap(
+    doc: PdfDocumentObject,
+    page: PdfPageObject,
+    rect: Rect,
+    options?: PdfRenderPageOptions,
+  ) {
+    this.logger.debug(
+      LOG_SOURCE,
+      LOG_CATEGORY,
+      'renderPageRectBitmap',
+      doc,
+      page,
+      rect,
+      options,
+    );
+    const requestId = this.generateRequestId(doc.id);
+    const task = new WorkerTask<ImageBitmap>(this.worker, requestId);
+
+    const request: ExecuteRequest = createRequest(requestId, 'renderPageRectBitmap', [
       doc,
       page,
       rect,

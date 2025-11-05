@@ -34,6 +34,7 @@ export interface TilingState {
 
 export interface TilingCapability {
   renderTile: (options: RenderTileOptions) => Task<Blob, PdfErrorReason>;
+  renderTileBitmap?: (options: RenderTileOptions) => Task<ImageBitmap, PdfErrorReason>;
   onTileRendering: EventHook<Record<number, Tile[]>>;
 }
 

@@ -2703,6 +2703,18 @@ export interface PdfEngine<T = Blob> {
     options?: PdfRenderPageOptions,
   ) => PdfTask<T>;
   /**
+   * Render the specified PDF page and return an ImageBitmap.
+   * Implementations may fall back to encoded output when ImageBitmap is unavailable.
+   * @param doc - pdf document
+   * @param page - pdf page
+   * @param options - render options
+   */
+  renderPageBitmap?: (
+    doc: PdfDocumentObject,
+    page: PdfPageObject,
+    options?: PdfRenderPageOptions,
+  ) => PdfTask<ImageBitmap>;
+  /**
    * Render the specified rect of pdf page
    * @param doc - pdf document
    * @param page - pdf page
@@ -2716,6 +2728,20 @@ export interface PdfEngine<T = Blob> {
     rect: Rect,
     options?: PdfRenderPageOptions,
   ) => PdfTask<T>;
+  /**
+   * Render the specified rect of a PDF page and return an ImageBitmap.
+   * Implementations may fall back to encoded output when ImageBitmap is unavailable.
+   * @param doc - pdf document
+   * @param page - pdf page
+   * @param rect - target rect
+   * @param options - render options
+   */
+  renderPageRectBitmap?: (
+    doc: PdfDocumentObject,
+    page: PdfPageObject,
+    rect: Rect,
+    options?: PdfRenderPageOptions,
+  ) => PdfTask<ImageBitmap>;
   /**
    * Render the thumbnail of specified pdf page
    * @param doc - pdf document

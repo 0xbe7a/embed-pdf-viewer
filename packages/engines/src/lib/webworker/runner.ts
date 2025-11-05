@@ -351,7 +351,13 @@ export class EngineRunner {
       case 'renderPage':
         task = this.engine[name]!(...args);
         break;
+      case 'renderPageBitmap':
+        task = this.engine[name]!(...args);
+        break;
       case 'renderPageRect':
+        task = this.engine[name]!(...args);
+        break;
+      case 'renderPageRectBitmap':
         task = this.engine[name]!(...args);
         break;
       case 'renderPageAnnotation':
@@ -458,7 +464,11 @@ export class EngineRunner {
             value: result,
           },
         };
-        this.respond(response);
+        const transferables: Transferable[] = [];
+        if (typeof ImageBitmap !== 'undefined' && result instanceof ImageBitmap) {
+          transferables.push(result as Transferable);
+        }
+        this.respond(response, transferables.length > 0 ? transferables : undefined);
         this.tasks.delete(request.id);
         this.cancelledIds.delete(request.id);
       },
@@ -484,8 +494,15 @@ export class EngineRunner {
    *
    * @protected
    */
-  respond(response: Response) {
+  respond(response: Response, transferables?: Transferable[]) {
     this.logger.debug(LOG_SOURCE, LOG_CATEGORY, 'runner respond: ', response);
-    self.postMessage(response);
+    if (transferables && transferables.length > 0) {
+      (self as unknown as { postMessage(message: Response, transfer: Transferable[]): void }).postMessage(
+        response,
+        transferables,
+      );
+    } else {
+      self.postMessage(response);
+    }
   }
 }

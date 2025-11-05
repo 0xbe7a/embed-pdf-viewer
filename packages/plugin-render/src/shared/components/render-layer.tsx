@@ -35,7 +35,14 @@ export function RenderLayer({
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const { className, ...restProps } = props;
+  const canvasAttributes = restProps as unknown as Record<string, unknown>;
+  const bitmapForcedOff =
+    typeof globalThis === 'object' && !!(globalThis as Record<string, unknown>).__EMBEDPDF_FORCE_BLOB;
+  const supportsBitmap =
+    !bitmapForcedOff && typeof renderProvides?.renderPageBitmap === 'function' && !!renderProvides;
 
   useEffect(() => {
     if (!renderPlugin) return;
@@ -47,30 +54,79 @@ export function RenderLayer({
   }, [renderPlugin]);
 
   useEffect(() => {
-    if (renderProvides) {
-      const task = renderProvides.renderPage({
+    if (!renderProvides) return;
+
+    if (supportsBitmap && renderProvides.renderPageBitmap) {
+      const bitmapTask = renderProvides.renderPageBitmap({
         pageIndex,
         options: { scaleFactor: actualScale, dpr: dpr || window.devicePixelRatio },
       });
-      task.wait((blob) => {
-        const url = URL.createObjectURL(blob);
-        setImageUrl(url);
-        urlRef.current = url;
-      }, ignore);
 
-      return () => {
+      let completed = false;
+
+      bitmapTask.wait((bitmap) => {
+        completed = true;
+        setImageUrl(null);
         if (urlRef.current) {
           URL.revokeObjectURL(urlRef.current);
           urlRef.current = null;
+        }
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          if (typeof bitmap.close === 'function') bitmap.close();
+          return;
+        }
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const bitmapCtx = canvas.getContext('bitmaprenderer') as ImageBitmapRenderingContext | null;
+        if (bitmapCtx) {
+          bitmapCtx.transferFromImageBitmap(bitmap);
         } else {
-          task.abort({
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(bitmap, 0, 0);
+          }
+          if (typeof bitmap.close === 'function') bitmap.close();
+        }
+      }, ignore);
+
+      return () => {
+        if (!completed) {
+          bitmapTask.abort({
             code: PdfErrorCode.Cancelled,
             message: 'canceled render task',
           });
         }
       };
     }
-  }, [pageIndex, actualScale, dpr, renderProvides, refreshTick]);
+
+    const blobTask = renderProvides.renderPage({
+      pageIndex,
+      options: { scaleFactor: actualScale, dpr: dpr || window.devicePixelRatio },
+    });
+
+    let completed = false;
+
+    blobTask.wait((blob) => {
+      const url = URL.createObjectURL(blob);
+      setImageUrl(url);
+      urlRef.current = url;
+      completed = true;
+    }, ignore);
+
+    return () => {
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+      } else if (!completed) {
+        blobTask.abort({
+          code: PdfErrorCode.Cancelled,
+          message: 'canceled render task',
+        });
+      }
+    };
+  }, [pageIndex, actualScale, dpr, renderProvides, refreshTick, supportsBitmap]);
 
   const handleImageLoad = () => {
     if (urlRef.current) {
@@ -81,17 +137,31 @@ export function RenderLayer({
 
   return (
     <Fragment>
-      {imageUrl && (
-        <img
-          src={imageUrl}
-          onLoad={handleImageLoad}
-          {...props}
+      {supportsBitmap ? (
+        <canvas
+          ref={canvasRef}
+          className={className}
+          {...(canvasAttributes as any)}
           style={{
             width: '100%',
             height: '100%',
             ...(style || {}),
           }}
         />
+      ) : (
+        imageUrl && (
+          <img
+            src={imageUrl}
+            onLoad={handleImageLoad}
+            {...restProps}
+            className={className}
+            style={{
+              width: '100%',
+              height: '100%',
+              ...(style || {}),
+            }}
+          />
+        )
       )}
     </Fragment>
   );

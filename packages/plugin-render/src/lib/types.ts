@@ -28,4 +28,6 @@ export interface RenderPageOptions {
 export interface RenderCapability {
   renderPage: (options: RenderPageOptions) => Task<Blob, PdfErrorReason>;
   renderPageRect: (options: RenderPageRectOptions) => Task<Blob, PdfErrorReason>;
+  renderPageBitmap?: (options: RenderPageOptions) => Task<ImageBitmap, PdfErrorReason>;
+  renderPageRectBitmap?: (options: RenderPageRectOptions) => Task<ImageBitmap, PdfErrorReason>;
 }

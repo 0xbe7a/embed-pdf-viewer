@@ -1111,6 +1111,33 @@ export class PdfiumEngine<T = Blob> implements PdfEngine<T> {
     return task;
   }
 
+  renderPageBitmap(
+    doc: PdfDocumentObject,
+    page: PdfPageObject,
+    options?: PdfRenderPageOptions,
+  ): PdfTask<ImageBitmap> {
+    this.logger.debug(LOG_SOURCE, LOG_CATEGORY, 'renderPageBitmap', doc, page, options);
+    this.logger.perf(
+      LOG_SOURCE,
+      LOG_CATEGORY,
+      `RenderPageBitmap`,
+      'Begin',
+      `${doc.id}-${page.index}`,
+    );
+
+    const rect = { origin: { x: 0, y: 0 }, size: page.size };
+    const task = this.renderRectBitmap(doc, page, rect, options);
+    this.logger.perf(
+      LOG_SOURCE,
+      LOG_CATEGORY,
+      `RenderPageBitmap`,
+      'End',
+      `${doc.id}-${page.index}`,
+    );
+
+    return task;
+  }
+
   /**
    * {@inheritDoc @embedpdf/models!PdfEngine.renderPageRect}
    *
@@ -1133,6 +1160,33 @@ export class PdfiumEngine<T = Blob> implements PdfEngine<T> {
 
     const task = this.renderRectEncoded(doc, page, rect, options);
     this.logger.perf(LOG_SOURCE, LOG_CATEGORY, `RenderPageRect`, 'End', `${doc.id}-${page.index}`);
+
+    return task;
+  }
+
+  renderPageRectBitmap(
+    doc: PdfDocumentObject,
+    page: PdfPageObject,
+    rect: Rect,
+    options?: PdfRenderPageOptions,
+  ): PdfTask<ImageBitmap> {
+    this.logger.debug(LOG_SOURCE, LOG_CATEGORY, 'renderPageRectBitmap', doc, page, rect, options);
+    this.logger.perf(
+      LOG_SOURCE,
+      LOG_CATEGORY,
+      `RenderPageRectBitmap`,
+      'Begin',
+      `${doc.id}-${page.index}`,
+    );
+
+    const task = this.renderRectBitmap(doc, page, rect, options);
+    this.logger.perf(
+      LOG_SOURCE,
+      LOG_CATEGORY,
+      `RenderPageRectBitmap`,
+      'End',
+      `${doc.id}-${page.index}`,
+    );
 
     return task;
   }
@@ -6921,6 +6975,136 @@ export class PdfiumEngine<T = Blob> implements PdfEngine<T> {
     } finally {
       this.memoryManager.free(outPtrPtr);
     }
+  }
+
+  private renderRectBitmap(
+    doc: PdfDocumentObject,
+    page: PdfPageObject,
+    rect: Rect,
+    options?: PdfRenderPageOptions,
+  ): PdfTask<ImageBitmap> {
+    if (typeof createImageBitmap !== 'function') {
+      return PdfTaskHelper.reject({
+        code: PdfErrorCode.NotSupport,
+        message: 'createImageBitmap is not supported in this environment',
+      });
+    }
+
+    const task = new Task<ImageBitmap, PdfErrorReason>();
+
+    const rotation: Rotation = options?.rotation ?? Rotation.Degree0;
+    const scale = Math.max(0.01, options?.scaleFactor ?? 1);
+    const dpr = Math.max(1, options?.dpr ?? 1);
+    const finalScale = scale * dpr;
+
+    const ctx = this.cache.getContext(doc.id);
+    if (!ctx) {
+      return PdfTaskHelper.reject({
+        code: PdfErrorCode.DocNotOpen,
+        message: 'document does not open',
+      });
+    }
+
+    const baseW = rect.size.width;
+    const baseH = rect.size.height;
+    const swap = (rotation & 1) === 1;
+
+    const wDev = Math.max(1, Math.round((swap ? baseH : baseW) * finalScale));
+    const hDev = Math.max(1, Math.round((swap ? baseW : baseH) * finalScale));
+    const stride = wDev * 4;
+    const bytes = stride * hDev;
+
+    const pageCtx = ctx.acquirePage(page.index);
+    const shouldRenderForms = options?.withForms ?? false;
+    const formHandle = shouldRenderForms ? pageCtx.getFormHandle() : undefined;
+
+    const heapPtr = this.memoryManager.malloc(bytes);
+    const bitmapPtr = this.pdfiumModule.FPDFBitmap_CreateEx(
+      wDev,
+      hDev,
+      BitmapFormat.Bitmap_BGRA,
+      heapPtr,
+      stride,
+    );
+    this.pdfiumModule.FPDFBitmap_FillRect(bitmapPtr, 0, 0, wDev, hDev, 0xffffffff);
+
+    const M = buildUserToDeviceMatrix(rect, rotation, wDev, hDev);
+    const mPtr = this.memoryManager.malloc(6 * 4);
+    const mView = new Float32Array(this.pdfiumModule.pdfium.HEAPF32.buffer, mPtr, 6);
+    mView.set([M.a, M.b, M.c, M.d, M.e, M.f]);
+
+    const clipPtr = this.memoryManager.malloc(4 * 4);
+    const clipView = new Float32Array(this.pdfiumModule.pdfium.HEAPF32.buffer, clipPtr, 4);
+    clipView.set([0, 0, wDev, hDev]);
+
+    let flags = RenderFlag.REVERSE_BYTE_ORDER;
+    if (options?.withAnnotations ?? false) flags |= RenderFlag.ANNOT;
+
+    try {
+      this.pdfiumModule.FPDF_RenderPageBitmapWithMatrix(
+        bitmapPtr,
+        pageCtx.pagePtr,
+        mPtr,
+        clipPtr,
+        flags,
+      );
+
+      if (formHandle !== undefined) {
+        const formParams = computeFormDrawParams(M, rect, page.size, rotation);
+        const { startX, startY, formsWidth, formsHeight } = formParams;
+
+        this.pdfiumModule.FPDF_FFLDraw(
+          formHandle,
+          bitmapPtr,
+          pageCtx.pagePtr,
+          startX,
+          startY,
+          formsWidth,
+          formsHeight,
+          rotation,
+          flags,
+        );
+      }
+    } finally {
+      pageCtx.release();
+      this.memoryManager.free(mPtr);
+      this.memoryManager.free(clipPtr);
+    }
+
+    const dispose = (() => {
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        this.pdfiumModule.FPDFBitmap_Destroy(bitmapPtr);
+        this.memoryManager.free(heapPtr);
+      };
+    })();
+
+    try {
+      const heapBuf = this.pdfiumModule.pdfium.HEAPU8;
+      const copy = new Uint8ClampedArray(heapBuf.subarray(heapPtr, heapPtr + bytes));
+      dispose();
+
+      const imageData = new ImageData(copy, wDev, hDev);
+      createImageBitmap(imageData)
+        .then((bitmap) => task.resolve(bitmap))
+        .catch((e) =>
+          task.reject({
+            code: PdfErrorCode.Unknown,
+            message: String(e),
+          }),
+        )
+        .finally(dispose);
+    } catch (e) {
+      dispose();
+      task.reject({
+        code: PdfErrorCode.Unknown,
+        message: String(e),
+      });
+    }
+
+    return task;
   }
 
   private renderRectEncoded(
